@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Gerador de Jogos Mega-Sena</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  .tabs {
+    display: flex;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .tab {
+    padding: 10px 20px;
+    border: 1px solid #007BFF;
+    border-bottom: none;
+    background-color: #eee;
+    margin-right: 2px;
+  }
+  .tab.active {
+    background-color: #007BFF;
+    color: white;
+    font-weight: bold;
+  }
+  .tab-content {
+    border: 1px solid #007BFF;
+    padding: 15px;
+    display: none;
+  }
+  .tab-content.active {
+    display: block;
+  }
+  textarea {
+    width: 100%;
+    height: 120px;
+    font-family: monospace;
+    font-size: 14px;
+  }
+  button {
+    margin-top: 10px;
+    padding: 10px;
+    font-size: 16px;
+    width: 100%;
+    cursor: pointer;
+  }
+  #visualizacaoJogos {
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: monospace;
+    background: #f9f9f9;
+    padding: 10px;
+    white-space: pre-wrap;
+  }
+  #msgArquivo, #msgSalvar {
+    margin-top: 10px;
+    font-weight: bold;
+  }
+  #resultado {
+    margin-top: 10px;
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Gerador de Jogos Mega-Sena</h1>
+
+<div class="tabs">
+  <div class="tab active" data-tab="manual">Histórico Manual</div>
+  <div class="tab" data-tab="carregar">Carregar Arquivo</div>
+  <div class="tab" data-tab="visualizar">Visualizar Jogos</div>
+  <div class="tab" data-tab="gerar">Gerar e Exportar</div>
+</div>
+
+<div id="manual" class="tab-content active">
+  <label for="historicoManual">Digite resultados históricos (6 números por linha, separados por vírgula):</label><br />
+  <textarea id="historicoManual" placeholder="Exemplo:
+1,5,12,23,34,56
+3,8,19,27,45,59
+..."></textarea>
+  <button onclick="salvarHistoricoManual()">Salvar Histórico Manual</button>
+  <button onclick="exportarHistoricoManual()">Exportar Histórico Manual (Salvar arquivo)</button>
+  <div id="msgSalvar"></div>
+</div>
+
+<div id="carregar" class="tab-content">
+  <label for="inputArquivo">Escolha um arquivo (.txt ou .json) com jogos:</label><br />
+  <input type="file" id="inputArquivo" accept=".txt,.json" />
+  <button onclick="carregarArquivo()">Carregar Arquivo</button>
+  <p id="msgArquivo"></p>
+</div>
+
+<div id="visualizar" class="tab-content">
+  <h3>Jogos carregados:</h3>
+  <pre id="visualizacaoJogos">(Nenhum jogo carregado)</pre>
+</div>
+
+<div id="gerar" class="tab-content">
+  <button onclick="gerarJogo()">Gerar jogo sugerido</button>
+  <button onclick="exportarJogo()" id="btnExportar" disabled>Exportar jogo sugerido</button>
+  <div id="resultado"></div>
+</div>
+
+<script>
+  // Controle das abas
+  const tabs = document.querySelectorAll('.tab');
+  const contents = document.querySelectorAll('.tab-content');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      contents.forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  let jogosCarregados = [];
+  let melhorConjunto = null;
+
+  // Função para salvar o histórico manual do textarea
+  function salvarHistoricoManual() {
+    const texto = document.getElementById('historicoManual').value.trim();
+    const jogos = parseHistorico(texto);
+    if (jogos.length === 0) {
+      alert("Insira resultados válidos no histórico manual (6 números por linha).");
+      return;
+    }
+    jogosCarregados = jogos;
+    document.getElementById('msgSalvar').textContent = `Histórico salvo com ${jogos.length} jogos.`;
+    mostrarJogosCarregados();
+  }
+
+  // Função para exportar o conteúdo do textarea do histórico manual
+  function exportarHistoricoManual() {
+    const texto = document.getElementById('historicoManual').value.trim();
+    if (!texto) {
+      alert("Nada para exportar. Digite ou cole os jogos no histórico manual.");
+      return;
+    }
+    const blob = new Blob([texto], {type: "text/plain;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'historico_manual_mega_sena.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // Função para transformar texto em array de jogos (arrays de 6 números)
+  function parseHistorico(texto) {
+    if (!texto) return [];
+    const linhas = texto.split('\n');
+    return linhas.map(linha =>
+      linha.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n >= 1 && n <= 60)
+    ).filter(arr => arr.length === 6);
+  }
+
+  // Carregar arquivo txt ou json
+  function carregarArquivo() {
+    const input = document.getElementById('inputArquivo');
+    const msg = document.getElementById('msgArquivo');
+    if (input.files.length === 0) {
+      alert("Selecione um arquivo primeiro.");
+      return;
+    }
+    const file = input.files[0];
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+      const text = e.target.result.trim();
+      let jogos = [];
+
+      try {
+        // Tenta ler como JSON
+        const obj = JSON.parse(text);
+        if (Array.isArray(obj)) {
+          jogos = obj.filter(arr => Array.isArray(arr) && arr.length === 6 && arr.every(n => typeof n === 'number' && n >= 1 && n <= 60));
+        } else if (obj.jogoSugerido && Array.isArray(obj.jogoSugerido)) {
+          jogos = [obj.jogoSugerido];
+        } else {
+          msg.textContent = "Formato JSON inválido para jogos.";
+          return;
+        }
+      } catch {
+        // Se não JSON, tenta txt: 6 números por linha, separados por vírgula
+        jogos = parseHistorico(text);
+      }
+
+      if (jogos.length === 0) {
+        msg.textContent = "Nenhum jogo válido encontrado no arquivo.";
+        return;
+      }
+
+      jogosCarregados = jogos;
+      mostrarJogosCarregados();
+      msg.textContent = `Arquivo carregado com ${jogos.length} jogos.`;
+      alert("Arquivo carregado com sucesso!");
+    };
+
+    reader.readAsText(file);
+  }
+
+  // Mostrar jogos carregados na aba visualizar
+  function mostrarJogosCarregados() {
+    const display = document.getElementById('visualizacaoJogos');
+    if (jogosCarregados.length === 0) {
+      display.textContent = "(Nenhum jogo carregado)";
+      return;
+    }
+    display.textContent = jogosCarregados.map(j => j.join(', ')).join('\n');
+  }
+
+  // Cálculo média
+  function calcularMedia(arr) {
+    return arr.reduce((a,b) => a + b, 0) / arr.length;
+  }
+
+  // Cálculo desvio padrão
+  function calcularDesvioPadrao(arr) {
+    const media = calcularMedia(arr);
+    const somaQuadrados = arr.reduce((acc, val) => acc + Math.pow(val - media, 2), 0);
+    return Math.sqrt(somaQuadrados / arr.length);
+  }
+
+  // Frequência dos números em todos os jogos carregados
+  function calcularFrequencias(jogos) {
+    const freq = Array(60).fill(0);
+    jogos.forEach(jogo => {
+      jogo.forEach(num => {
+        freq[num - 1]++;
+      });
+    });
+    return freq;
+  }
+
+  // Gera todas as combinações k elementos de arr
+  function combina(arr, k) {
+    const results = [];
+    function backtrack(start, path) {
+      if (path.length === k) {
+        results.push([...path]);
+        return;
+      }
+      for (let i = start; i < arr.length; i++) {
+        path.push(arr[i]);
+        backtrack(i + 1, path);
+        path.pop();
+      }
+    }
+    backtrack(0, []);
+    return results;
+  }
+
+  // Gerar o jogo sugerido
+  function gerarJogo() {
+    if (jogosCarregados.length === 0) {
+      alert("Nenhum jogo carregado. Use a aba 'Histórico Manual' ou 'Carregar Arquivo' para inserir jogos.");
+      return;
+    }
+
+    const freq = calcularFrequencias(jogosCarregados);
+    const todasJogadas = jogosCarregados.flat();
+    const mediaHistorica = calcularMedia(todasJogadas);
+    const desvioHistorico = calcularDesvioPadrao(todasJogadas);
+
+    // Ordena números por frequência decrescente
+    const numsOrdenados = freq
+      .map((f, i) => ({ num: i + 1, freq: f }))
+      .sort((a,b) => b.freq - a.freq);
+
+    function avaliaConjunto(conjunto) {
+      const media = calcularMedia(conjunto);
+      const desvio = calcularDesvioPadrao(conjunto);
+      const diffMedia = Math.abs(media - mediaHistorica);
+      const diffDesvio = Math.abs(desvio - desvioHistorico);
+      return diffMedia + diffDesvio;
+    }
+
+    const top10 = numsOrdenados.slice(0, 10).map(x => x.num);
+    const combos = combina(top10, 6);
+
+    melhorConjunto = null;
+    let melhorScore = Infinity;
+
+    combos.forEach(cj => {
+      const score = avaliaConjunto(cj);
+      if (score < melhorScore) {
+        melhorScore = score;
+        melhorConjunto = cj;
+      }
+    });
+
+    const resultadoDiv = document.getElementById('resultado');
+    resultadoDiv.innerHTML = `
+      <p><strong>Média histórica geral:</strong> ${mediaHistorica.toFixed(2)}</p>
+      <p><strong>Desvio padrão histórico geral:</strong> ${desvioHistorico.toFixed(2)}</p>
+      <p><strong>Jogo sugerido (6 números):</strong> [${melhorConjunto.join(', ')}]</p>
+      <p><strong>Média do jogo sugerido:</strong> ${calcularMedia(melhorConjunto).toFixed(2)}</p>
+      <p><strong>Desvio padrão do jogo sugerido:</strong> ${calcularDesvioPadrao(melhorConjunto).toFixed(2)}</p>
+    `;
+
+    document.getElementById('btnExportar').disabled = false;
+  }
+
+   // Exportar o jogo sugerido em JSON para salvar no PC
+   function exportarJogo() {
+    if (!melhorConjunto) {
+      alert("Nenhum jogo gerado para exportar.");
+      return;
+    }
+    const dados = {
+      jogoSugerido: melhorConjunto
+    };
+    const jsonStr = JSON.stringify(dados, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'jogo_sugerido_mega_sena.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+</script>
+</body>
+</html>
